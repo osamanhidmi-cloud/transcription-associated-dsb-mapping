@@ -103,14 +103,17 @@ gene_universe <- tss_scores$gene |>
   clean_gene_symbol() |>
   unique()
 
+n_top_use <- min(n_top, nrow(tss_scores))
+n_bottom_use <- min(n_bottom, nrow(tss_scores))
+
 top_tss_genes <- tss_scores |>
   arrange(desc(TSS_final)) |>
-  slice_head(n = min(n_top, n())) |>
+  slice_head(n = n_top_use) |>
   pull(gene)
 
 bottom_tss_genes <- tss_scores |>
   arrange(TSS_final) |>
-  slice_head(n = min(n_bottom, n())) |>
+  slice_head(n = n_bottom_use) |>
   pull(gene)
 
 # ------------------------------------------------------------
