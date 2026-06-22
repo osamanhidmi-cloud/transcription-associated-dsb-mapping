@@ -2,16 +2,31 @@
 # 01_score_transcription_stress_genes.R
 #
 # Purpose:
-# Rank genes by transcription-stress score using the scoring method
-# described in the paper:
-#   - empirical P value from rank
-#   - inverse normal transformation
-#   - unweighted Liptak Z-score combination
-#   - min-max scaling
-#   - power transformation
+# Rank genes by transcription-stress score using gene-level
+# signal densities from:
+#   1. endogenous DSBs / sBLISS
+#   2. R-loops / DRIP-seq
+#   3. TOP1 occupancy
+#   4. TOP1cc signal
 #
-# Genes not present among the top 1000 genes in all four parameters
-# are excluded.
+# Scoring method:
+#   - Rank genes within each dataset
+#   - Convert ranks to empirical P values
+#   - Convert empirical P values to Z-scores
+#   - Combine Z-scores using unweighted Liptak/Stouffer method
+#   - Min-max scale the combined score
+#   - Apply power transformation: TSS_final = TSS_scaled^4
+#
+# Input files expected in data/example/:
+#   break_density_gene_level.csv
+#   rloop_density_gene_level.csv
+#   top1_density_gene_level.csv
+#   top1cc_density_gene_level.csv
+#   sedb_mcf7_genes.csv
+#
+# Output:
+#   results/transcription_stress_gene_scores.csv
+#   results/top_100_transcription_stress_genes.csv
 # ============================================================
 
 suppressPackageStartupMessages({
@@ -29,6 +44,8 @@ output_dir <- "results"
 
 dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 
+# In the publication analysis, genes not among the top 1000
+# in one or more parameters were excluded.
 n_top_genes <- 1000
 
 # ------------------------------------------------------------
@@ -43,30 +60,20 @@ clean_gene_symbol <- function(x) {
     toupper()
 }
 
-# Convert signal density to empirical P value based on rank.
-# Higher signal = lower empirical P value.
 add_empirical_p_and_z <- function(df, signal_col, prefix) {
   signal_col <- rlang::ensym(signal_col)
   
   df |>
     arrange(desc(!!signal_col)) |>
     mutate(
-      rank = row_number(),
+      "{prefix}_rank" := row_number(),
       n_genes = n(),
       
-      # Higher signal gets smaller empirical P value.
-      empirical_p = rank / (n_genes + 1),
-      
-      # Avoid infinite z-scores.
-      empirical_p = pmin(pmax(empirical_p, 1 / (n_genes + 1)), n_genes / (n_genes + 1)),
+      # Higher signal values correspond to lower empirical P values.
+      "{prefix}_empirical_p" := .data[[paste0(prefix, "_rank")]] / (n_genes + 1),
       
       # Z_k = Phi^-1(1 - p_k)
-      z_score = qnorm(1 - empirical_p)
-    ) |>
-    rename(
-      "{prefix}_rank" := rank,
-      "{prefix}_empirical_p" := empirical_p,
-      "{prefix}_z" := z_score
+      "{prefix}_z" := qnorm(1 - .data[[paste0(prefix, "_empirical_p")]])
     ) |>
     select(-n_genes)
 }
@@ -74,6 +81,10 @@ add_empirical_p_and_z <- function(df, signal_col, prefix) {
 min_max_scale <- function(x) {
   x_min <- min(x, na.rm = TRUE)
   x_max <- max(x, na.rm = TRUE)
+  
+  if (!is.finite(x_min) || !is.finite(x_max)) {
+    stop("Cannot min-max scale: input contains no finite values.")
+  }
   
   if (x_max == x_min) {
     return(rep(0, length(x)))
@@ -83,26 +94,31 @@ min_max_scale <- function(x) {
 }
 
 # ------------------------------------------------------------
-# Read input tables
+# Read processed gene-level input tables
 # ------------------------------------------------------------
 
 break_density <- read_csv(
-  file.path(input_dir, "break_density_example.csv"),
+  file.path(input_dir, "break_density_gene_level.csv"),
   show_col_types = FALSE
 )
 
-drip_density <- read_csv(
-  file.path(input_dir, "drip_density_example.csv"),
+rloop_density <- read_csv(
+  file.path(input_dir, "rloop_density_gene_level.csv"),
   show_col_types = FALSE
 )
 
 top1_density <- read_csv(
-  file.path(input_dir, "top1_density_example.csv"),
+  file.path(input_dir, "top1_density_gene_level.csv"),
   show_col_types = FALSE
 )
 
 top1cc_density <- read_csv(
-  file.path(input_dir, "top1cc_density_example.csv"),
+  file.path(input_dir, "top1cc_density_gene_level.csv"),
+  show_col_types = FALSE
+)
+
+sedb_mcf7_genes <- read_csv(
+  file.path(input_dir, "sedb_mcf7_genes.csv"),
   show_col_types = FALSE
 )
 
@@ -110,13 +126,10 @@ top1cc_density <- read_csv(
 # Standardize signal tables
 # ------------------------------------------------------------
 
-# DSB signal from sBLISS.
-# SE_mean represents the control condition:
-# scramble siRNA + empty vector.
 dsb_tbl <- break_density |>
   transmute(
-    gene = clean_gene_symbol(symbol),
-    dsb_density = SE_mean
+    gene = clean_gene_symbol(gene),
+    dsb_density = as.numeric(dsb_density)
   ) |>
   filter(!is.na(gene), !is.na(dsb_density)) |>
   group_by(gene) |>
@@ -125,11 +138,10 @@ dsb_tbl <- break_density |>
     .groups = "drop"
   )
 
-# R-loop signal from DRIP-seq.
-rloop_tbl <- drip_density |>
+rloop_tbl <- rloop_density |>
   transmute(
-    gene = clean_gene_symbol(symb),
-    rloop_density = dens
+    gene = clean_gene_symbol(gene),
+    rloop_density = as.numeric(rloop_density)
   ) |>
   filter(!is.na(gene), !is.na(rloop_density)) |>
   group_by(gene) |>
@@ -138,11 +150,10 @@ rloop_tbl <- drip_density |>
     .groups = "drop"
   )
 
-# TOP1 occupancy.
 top1_tbl <- top1_density |>
   transmute(
-    gene = clean_gene_symbol(symb),
-    top1_density = dens
+    gene = clean_gene_symbol(gene),
+    top1_density = as.numeric(top1_density)
   ) |>
   filter(!is.na(gene), !is.na(top1_density)) |>
   group_by(gene) |>
@@ -151,12 +162,10 @@ top1_tbl <- top1_density |>
     .groups = "drop"
   )
 
-# TOP1cc signal.
-# SE is the control signal column in this table.
 top1cc_tbl <- top1cc_density |>
   transmute(
     gene = clean_gene_symbol(gene),
-    top1cc_density = SE
+    top1cc_density = as.numeric(top1cc_density)
   ) |>
   filter(!is.na(gene), !is.na(top1cc_density)) |>
   group_by(gene) |>
@@ -166,7 +175,17 @@ top1cc_tbl <- top1cc_density |>
   )
 
 # ------------------------------------------------------------
-# Add empirical P values and z-scores for each dataset
+# Standardize SE-regulated gene list
+# ------------------------------------------------------------
+
+se_genes <- sedb_mcf7_genes |>
+  transmute(gene = clean_gene_symbol(gene)) |>
+  filter(!is.na(gene)) |>
+  distinct() |>
+  pull(gene)
+
+# ------------------------------------------------------------
+# Add empirical P values and Z-scores
 # ------------------------------------------------------------
 
 dsb_scored <- dsb_tbl |>
@@ -182,7 +201,7 @@ top1cc_scored <- top1cc_tbl |>
   add_empirical_p_and_z(top1cc_density, "top1cc")
 
 # ------------------------------------------------------------
-# Keep only genes among the top 1000 in all four parameters
+# Keep genes among the top 1000 in all four parameters
 # ------------------------------------------------------------
 
 candidate_genes <- dsb_scored |>
@@ -202,8 +221,16 @@ candidate_genes <- dsb_scored |>
   ) |>
   distinct()
 
+if (nrow(candidate_genes) == 0) {
+  stop(
+    "No genes are shared among the top ",
+    n_top_genes,
+    " of all four parameters. Check whether gene identifiers match across datasets."
+  )
+}
+
 # ------------------------------------------------------------
-# Combine scores using unweighted Liptak Z method
+# Combine scores using unweighted Liptak/Stouffer method
 # ------------------------------------------------------------
 
 transcription_stress_scores <- candidate_genes |>
@@ -214,7 +241,8 @@ transcription_stress_scores <- candidate_genes |>
   mutate(
     TSS_raw = (dsb_z + rloop_z + top1_z + top1cc_z) / sqrt(4),
     TSS_scaled = min_max_scale(TSS_raw),
-    TSS_final = TSS_scaled^4
+    TSS_final = TSS_scaled^4,
+    SE_regulated = gene %in% se_genes
   ) |>
   arrange(desc(TSS_final)) |>
   mutate(TSS_rank = row_number())
@@ -238,5 +266,6 @@ write_csv(
 # ------------------------------------------------------------
 
 message("Analysis complete.")
-message("Genes retained after top-1000 intersection: ", nrow(transcription_stress_scores))
+message("Genes retained after top-", n_top_genes, " intersection: ", nrow(transcription_stress_scores))
+message("SE-regulated genes retained: ", sum(transcription_stress_scores$SE_regulated))
 message("Output written to: ", file.path(output_dir, "transcription_stress_gene_scores.csv"))
