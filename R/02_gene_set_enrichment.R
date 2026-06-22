@@ -2,11 +2,16 @@
 # 02_gene_set_enrichment.R
 #
 # Purpose:
-# Test enrichment or depletion of gene sets among transcription
-# stress genes using the hypergeometric test.
+# Test enrichment of gene sets among transcription-stress genes
+# using the hypergeometric test.
 #
 # Input:
 #   results/transcription_stress_gene_scores.csv
+#
+# Gene-set files expected in data/example/:
+#   sedb_mcf7_genes.csv
+#   oncogenes.csv
+#   top_1000_expressed.csv
 #
 # Output:
 #   results/transcription_stress_gene_set_enrichment.csv
@@ -49,18 +54,17 @@ hypergeom_gene_set_test <- function(query_genes,
   
   direction <- match.arg(direction)
   
+  gene_universe <- unique(clean_gene_symbol(gene_universe))
   query_genes <- intersect(unique(clean_gene_symbol(query_genes)), gene_universe)
   gene_set <- intersect(unique(clean_gene_symbol(gene_set)), gene_universe)
-  gene_universe <- unique(clean_gene_symbol(gene_universe))
   
-  M <- length(gene_universe)          # total genes in universe
-  N <- length(query_genes)            # selected genes
-  m <- length(gene_set)               # genes in gene set
-  n <- M - m                          # genes not in gene set
-  k <- length(intersect(query_genes, gene_set))  # observed overlap
+  M <- length(gene_universe)                 # total genes in universe
+  N <- length(query_genes)                   # selected genes
+  m <- length(gene_set)                      # genes in gene set
+  n <- M - m                                 # genes not in gene set
+  k <- length(intersect(query_genes, gene_set)) # observed overlap
   
   expected <- (m / M) * N
-  
   enrichment_ratio <- ifelse(expected == 0, NA_real_, k / expected)
   
   p_value <- if (direction == "enrichment") {
@@ -91,16 +95,22 @@ tss_scores <- read_csv(
   show_col_types = FALSE
 )
 
-gene_universe <- tss_scores$gene |> clean_gene_symbol() |> unique()
+if (nrow(tss_scores) == 0) {
+  stop("transcription_stress_gene_scores.csv is empty. Run script 01 first and check the input files.")
+}
+
+gene_universe <- tss_scores$gene |>
+  clean_gene_symbol() |>
+  unique()
 
 top_tss_genes <- tss_scores |>
   arrange(desc(TSS_final)) |>
-  slice_head(n = n_top) |>
+  slice_head(n = min(n_top, n())) |>
   pull(gene)
 
 bottom_tss_genes <- tss_scores |>
   arrange(TSS_final) |>
-  slice_head(n = n_bottom) |>
+  slice_head(n = min(n_bottom, n())) |>
   pull(gene)
 
 # ------------------------------------------------------------
@@ -108,17 +118,17 @@ bottom_tss_genes <- tss_scores |>
 # ------------------------------------------------------------
 
 sedb_mcf7_genes <- read_csv(
-  file.path(input_dir, "sedb_mcf7_genes_example.csv"),
+  file.path(input_dir, "sedb_mcf7_genes.csv"),
   show_col_types = FALSE
 )
 
 oncogenes <- read_csv(
-  file.path(input_dir, "oncogenes_example.csv"),
+  file.path(input_dir, "oncogenes.csv"),
   show_col_types = FALSE
 )
 
 top_expressed <- read_csv(
-  file.path(input_dir, "top_1000_expressed_example.csv"),
+  file.path(input_dir, "top_1000_expressed.csv"),
   show_col_types = FALSE
 )
 
@@ -127,19 +137,18 @@ top_expressed <- read_csv(
 # ------------------------------------------------------------
 
 se_genes <- sedb_mcf7_genes |>
-  pull(SEdb_MCF7_genes) |>
+  pull(gene) |>
   clean_gene_symbol()
 
 oncogene_genes <- oncogenes |>
-  pull(Hugo.Symbol) |>
+  pull(gene) |>
   clean_gene_symbol()
 
 highly_expressed_genes <- top_expressed |>
-  pull(`MCF7_RNA_seq$gene`) |>
+  pull(gene) |>
   clean_gene_symbol()
 
 se_oncogenes <- intersect(se_genes, oncogene_genes)
-
 highly_expressed_se_genes <- intersect(highly_expressed_genes, se_genes)
 
 # ------------------------------------------------------------
