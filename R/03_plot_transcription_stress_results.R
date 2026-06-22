@@ -2,7 +2,19 @@
 # 03_plot_transcription_stress_results.R
 #
 # Purpose:
-# Plot transcription-stress scores and gene-set enrichment results.
+# Generate plots from transcription-stress scoring and enrichment
+# results.
+#
+# Inputs:
+#   results/transcription_stress_gene_scores.csv
+#   results/transcription_stress_gene_set_enrichment.csv
+#
+# Outputs:
+#   figures/top_transcription_stress_genes_barplot.pdf
+#   figures/top_transcription_stress_genes_barplot.png
+#   figures/top_transcription_stress_genes_heatmap.pdf
+#   figures/transcription_stress_gene_set_enrichment.pdf
+#   figures/transcription_stress_gene_set_enrichment.png
 # ============================================================
 
 suppressPackageStartupMessages({
@@ -10,6 +22,7 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(ggplot2)
   library(pheatmap)
+  library(tibble)
 })
 
 # ------------------------------------------------------------
@@ -37,16 +50,24 @@ enrichment_results <- read_csv(
   show_col_types = FALSE
 )
 
+if (nrow(tss_scores) == 0) {
+  stop("transcription_stress_gene_scores.csv is empty. Run script 01 first.")
+}
+
+if (nrow(enrichment_results) == 0) {
+  stop("transcription_stress_gene_set_enrichment.csv is empty. Run script 02 first.")
+}
+
 # ------------------------------------------------------------
 # Plot 1: ranked transcription-stress genes
 # ------------------------------------------------------------
 
 top_tss_plot <- tss_scores |>
   arrange(desc(TSS_final)) |>
-  slice_head(n = n_genes_to_plot) |>
+  slice_head(n = min(n_genes_to_plot, n())) |>
   mutate(
     gene = factor(gene, levels = gene),
-    SE_regulated = ifelse(gene %in% gene[SE_regulated %in% TRUE], TRUE, FALSE)
+    SE_regulated = as.factor(SE_regulated)
   )
 
 p_tss <- ggplot(
@@ -85,21 +106,23 @@ ggsave(
 )
 
 # ------------------------------------------------------------
-# Plot 2: heatmap of individual z-scores
+# Plot 2: heatmap of individual Z-scores
 # ------------------------------------------------------------
 
 heatmap_df <- tss_scores |>
   arrange(desc(TSS_final)) |>
-  slice_head(n = n_genes_to_plot) |>
+  slice_head(n = min(n_genes_to_plot, n())) |>
   select(gene, dsb_z, rloop_z, top1cc_z, top1_z)
 
 heatmap_mat <- heatmap_df |>
-  tibble::column_to_rownames("gene") |>
+  column_to_rownames("gene") |>
   as.matrix()
 
-pdf(file.path(figures_dir, "top_transcription_stress_genes_heatmap.pdf"),
-    width = 5,
-    height = 8)
+pdf(
+  file.path(figures_dir, "top_transcription_stress_genes_heatmap.pdf"),
+  width = 5,
+  height = 8
+)
 
 pheatmap(
   heatmap_mat,
