@@ -5,10 +5,18 @@
 # Test enrichment of gene sets among transcription-stress genes
 # using the hypergeometric test.
 #
+# Important:
+# The gene universe must be the genome-wide/background gene set,
+# not only the final transcription-stress genes.
+#
 # Input:
 #   results/transcription_stress_gene_scores.csv
 #
-# Gene-set files expected in data/example/:
+# Files expected in data/example/:
+#   break_density_gene_level.csv
+#   rloop_density_gene_level.csv
+#   top1_density_gene_level.csv
+#   top1cc_density_gene_level.csv
 #   sedb_mcf7_genes.csv
 #   oncogenes.csv
 #   top_1000_expressed.csv
@@ -31,6 +39,7 @@ suppressPackageStartupMessages({
 input_dir <- "data/example"
 results_dir <- "results"
 
+# Since script 01 retained 64 genes, this will use all 64 if n_top > 64.
 n_top <- 100
 n_bottom <- 100
 
@@ -58,10 +67,10 @@ hypergeom_gene_set_test <- function(query_genes,
   query_genes <- intersect(unique(clean_gene_symbol(query_genes)), gene_universe)
   gene_set <- intersect(unique(clean_gene_symbol(gene_set)), gene_universe)
   
-  M <- length(gene_universe)                 # total genes in universe
-  N <- length(query_genes)                   # selected genes
-  m <- length(gene_set)                      # genes in gene set
-  n <- M - m                                 # genes not in gene set
+  M <- length(gene_universe)                    # total background genes
+  N <- length(query_genes)                      # selected genes
+  m <- length(gene_set)                         # genes in gene set
+  n <- M - m                                    # genes not in gene set
   k <- length(intersect(query_genes, gene_set)) # observed overlap
   
   expected <- (m / M) * N
@@ -99,9 +108,49 @@ if (nrow(tss_scores) == 0) {
   stop("transcription_stress_gene_scores.csv is empty. Run script 01 first and check the input files.")
 }
 
-gene_universe <- tss_scores$gene |>
-  clean_gene_symbol() |>
-  unique()
+# ------------------------------------------------------------
+# Read genome-wide processed signal tables to define background
+# ------------------------------------------------------------
+
+break_density <- read_csv(
+  file.path(input_dir, "break_density_gene_level.csv"),
+  show_col_types = FALSE
+)
+
+rloop_density <- read_csv(
+  file.path(input_dir, "rloop_density_gene_level.csv"),
+  show_col_types = FALSE
+)
+
+top1_density <- read_csv(
+  file.path(input_dir, "top1_density_gene_level.csv"),
+  show_col_types = FALSE
+)
+
+top1cc_density <- read_csv(
+  file.path(input_dir, "top1cc_density_gene_level.csv"),
+  show_col_types = FALSE
+)
+
+# Background gene universe:
+# all unique genes represented in the processed gene-level datasets.
+# This replaces the hard-coded 26915 used in the exploratory script.
+gene_universe <- Reduce(
+  union,
+  list(
+    clean_gene_symbol(break_density$gene),
+    clean_gene_symbol(rloop_density$gene),
+    clean_gene_symbol(top1_density$gene),
+    clean_gene_symbol(top1cc_density$gene)
+  )
+) |>
+  unique() |>
+  na.omit() |>
+  as.character()
+
+# ------------------------------------------------------------
+# Define top and bottom transcription-stress gene groups
+# ------------------------------------------------------------
 
 n_top_use <- min(n_top, nrow(tss_scores))
 n_bottom_use <- min(n_bottom, nrow(tss_scores))
@@ -208,5 +257,12 @@ write_csv(
   file.path(results_dir, "transcription_stress_gene_set_enrichment.csv")
 )
 
+# ------------------------------------------------------------
+# Print summary
+# ------------------------------------------------------------
+
 message("Enrichment analysis complete.")
+message("Background universe size: ", length(gene_universe))
+message("Top query size: ", length(top_tss_genes))
+message("Bottom query size: ", length(bottom_tss_genes))
 message("Output written to: ", file.path(results_dir, "transcription_stress_gene_set_enrichment.csv"))
