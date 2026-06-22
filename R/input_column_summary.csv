@@ -1,8 +1,0 @@
-"object","columns"
-"break_density","symbol; width; SE1_breaks; SE1_density; SE2_breaks; SE2_density; SR1_breaks; SR1_density; SR2_breaks; SR2_density; TE1_breaks; TE1_density; TE2_breaks; TE2_density; TR1_breaks; TR1_density; TR2_breaks; TR2_density; SE_mean; SR_mean; TE_mean; TR_mean; break_group"
-"DRIP_SE","symb; chr; start; end; strand; maxScore; cover; dens; maxScoreExt; coverExt; densExt"
-"TOP1_Idit","symb; chr; start; end; strand; maxScore; cover; dens; maxScoreExt; coverExt; densExt"
-"TOP1cc_all","gene; SE; SR; TE; TR"
-"SEdb_MCF7_genes","SEdb_MCF7_genes"
-"oncogenes","Hugo.Symbol; Entrez.Gene.ID; GRCh37.Isoform; GRCh37.RefSeq; GRCh38.Isoform; GRCh38.RefSeq; Is.Oncogene; Is.Tumor.Suppressor.Gene; X..of.occurrence.within.resources..Column.J.P.; OncoKB.Annotated; MSK.IMPACT; MSK.HEME; FOUNDATION.ONE; FOUNDATION.ONE.HEME; Vogelstein; COSMIC.CGC..v99.; Gene.Aliases"
-"top_1000_expressed","MCF7_RNA_seq$gene; MCF7_RNA_seq$TPM; MCF7_RNA_seq_3$TPM; MCF7_RNA_seq_5$TPM; MCF7_RNA_seq_7$TPM; MCF7_RNA_seq_8$TPM; MCF7_RNA_seq_9$TPM; mean"
