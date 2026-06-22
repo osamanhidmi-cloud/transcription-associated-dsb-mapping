@@ -1,16 +1,16 @@
 # ============================================================
-# 04_SE_genes_cancer_vs_normal.R
+# 03_SE_genes_cancer_vs_normal.R
 #
 # Analysis module:
 # SE genes in cancer vs normal
 #
 # Purpose:
-# Compare DNA break density at super-enhancer-regulated genes
-# across cancer and non-cancer cell lines.
+# Generate the Figure 1D-style boxplot:
+# break density at SE-regulated genes relative to all non-SE genes
+# across multiple cell lines.
 #
-# For each cell line, the break density at SE-regulated genes
-# is represented relative to the median break density of non-SE
-# genes from the same cell line.
+# This script intentionally uses base R boxplot to stay close to
+# the original plotting code used for the paper.
 #
 # Input:
 #   data/example/figure1d_se_gene_break_enrichment.csv
@@ -24,7 +24,6 @@
 suppressPackageStartupMessages({
   library(readr)
   library(dplyr)
-  library(ggplot2)
 })
 
 # ------------------------------------------------------------
@@ -62,7 +61,24 @@ if (length(missing_cols) > 0) {
 }
 
 # ------------------------------------------------------------
-# Clean and order data
+# Clean data
+# ------------------------------------------------------------
+
+se_breaks <- se_breaks |>
+  mutate(
+    cell_line = as.character(cell_line),
+    cell_type = as.character(cell_type),
+    gene = as.character(gene),
+    ratio_non_se = as.numeric(ratio_non_se)
+  ) |>
+  filter(
+    !is.na(cell_line),
+    !is.na(gene),
+    !is.na(ratio_non_se)
+  )
+
+# ------------------------------------------------------------
+# Cell-line order exactly matching the original boxplot order
 # ------------------------------------------------------------
 
 cell_line_order <- c(
@@ -78,156 +94,148 @@ cell_line_order <- c(
   "SH-SY5Y"
 )
 
-se_breaks <- se_breaks |>
-  mutate(
-    cell_line = factor(cell_line, levels = cell_line_order),
-    cell_type = factor(
-      cell_type,
-      levels = c("normal", "premalignant", "cancer")
-    ),
-    ratio_non_se = as.numeric(ratio_non_se)
-  ) |>
-  filter(
-    !is.na(cell_line),
-    !is.na(cell_type),
-    !is.na(gene),
-    !is.na(ratio_non_se)
-  )
-
 # ------------------------------------------------------------
-# Summary per cell line
+# Create vectors for each cell line
 # ------------------------------------------------------------
 
-cell_line_summary <- se_breaks |>
+HEK293_ratio <- se_breaks |>
+  filter(cell_line == "HEK293") |>
+  pull(ratio_non_se)
+
+A4098_ratio <- se_breaks |>
+  filter(cell_line == "A4098") |>
+  pull(ratio_non_se)
+
+HMLE_ratio <- se_breaks |>
+  filter(cell_line == "HMLE") |>
+  pull(ratio_non_se)
+
+MCF10A_ratio <- se_breaks |>
+  filter(cell_line == "MCF10A") |>
+  pull(ratio_non_se)
+
+MCF7_ratio <- se_breaks |>
+  filter(cell_line == "MCF7") |>
+  pull(ratio_non_se)
+
+T47D_ratio <- se_breaks |>
+  filter(cell_line == "T47D") |>
+  pull(ratio_non_se)
+
+MDA_MB_436_ratio <- se_breaks |>
+  filter(cell_line == "MDA-MB-436") |>
+  pull(ratio_non_se)
+
+MDA_MB_468_ratio <- se_breaks |>
+  filter(cell_line == "MDA-MB-468") |>
+  pull(ratio_non_se)
+
+NSC_ratio <- se_breaks |>
+  filter(cell_line == "NSC") |>
+  pull(ratio_non_se)
+
+SH_SY5Y_ratio <- se_breaks |>
+  filter(cell_line == "SH-SY5Y") |>
+  pull(ratio_non_se)
+
+# ------------------------------------------------------------
+# Export simple summary table
+# ------------------------------------------------------------
+
+summary_tbl <- se_breaks |>
+  mutate(cell_line = factor(cell_line, levels = cell_line_order)) |>
   group_by(cell_line, cell_type) |>
   summarise(
     n_SE_genes = n(),
     median_ratio_non_se = median(ratio_non_se, na.rm = TRUE),
     mean_ratio_non_se = mean(ratio_non_se, na.rm = TRUE),
     .groups = "drop"
-  )
+  ) |>
+  arrange(cell_line)
 
 write_csv(
-  cell_line_summary,
+  summary_tbl,
   file.path(results_dir, "SE_genes_cancer_vs_normal_summary.csv")
 )
 
 # ------------------------------------------------------------
-# Statistical comparison:
-# cancer versus non-cancer
+# Base R plotting function
+# Close to the original Figure 1D plotting code
 # ------------------------------------------------------------
 
-se_breaks <- se_breaks |>
-  mutate(
-    broad_group = ifelse(cell_type == "cancer", "cancer", "non-cancer")
+plot_se_boxplot <- function() {
+  
+  boxplot(
+    HEK293_ratio,
+    A4098_ratio,
+    HMLE_ratio,
+    MCF10A_ratio,
+    MCF7_ratio,
+    T47D_ratio,
+    MDA_MB_436_ratio,
+    MDA_MB_468_ratio,
+    NSC_ratio,
+    SH_SY5Y_ratio,
+    ylab = "Break density (SE genes relative to all non-SE genes)",
+    cex.lab = 1.4,
+    outpch = 16,
+    outcex = 0.2,
+    col = c(
+      "#dd9999",
+      "#aa1133",
+      "gray",
+      "#dd9999",
+      "#aa1133",
+      "#aa1133",
+      "#aa1133",
+      "#aa1133",
+      "gray",
+      "#aa1133"
+    ),
+    ylim = c(0, 18)
   )
-
-wilcox_cancer_vs_non_cancer <- wilcox.test(
-  ratio_non_se ~ broad_group,
-  data = se_breaks
-)
-
-stats_summary <- tibble(
-  comparison = "Cancer versus non-cancer cell lines",
-  test = "Wilcoxon rank-sum test",
-  p_value = wilcox_cancer_vs_non_cancer$p.value
-)
-
-write_csv(
-  stats_summary,
-  file.path(results_dir, "SE_genes_cancer_vs_normal_statistics.csv")
-)
+  
+  y_ticks <- c(seq(0, 5, by = 1), seq(10, 15, by = 5))
+  y_labels <- y_ticks
+  
+  axis(2, at = y_ticks, labels = y_labels)
+}
 
 # ------------------------------------------------------------
-# Plot 1:
-# Cell-line-level boxplot
+# Save PDF
 # ------------------------------------------------------------
 
-p_cell_lines <- ggplot(
-  se_breaks,
-  aes(x = cell_line, y = ratio_non_se, fill = cell_type)
-) +
-  geom_boxplot(
-    outlier.shape = 16,
-    outlier.size = 0.5
-  ) +
-  coord_cartesian(ylim = c(0, 18)) +
-  labs(
-    title = "DNA break enrichment at SE-regulated genes",
-    subtitle = "SE genes shown relative to median non-SE genes in each cell line",
-    x = "Cell line",
-    y = "Break density at SE genes / median non-SE genes",
-    fill = "Cell type"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    panel.grid = element_blank(),
-    axis.text.x = element_text(angle = 45, hjust = 1)
-  )
-
-ggsave(
-  filename = file.path(figures_dir, "SE_genes_cancer_vs_normal_boxplot.pdf"),
-  plot = p_cell_lines,
+pdf(
+  file = file.path(figures_dir, "SE_genes_cancer_vs_normal_boxplot.pdf"),
   width = 8,
   height = 5
 )
 
-ggsave(
+plot_se_boxplot()
+
+dev.off()
+
+# ------------------------------------------------------------
+# Save PNG
+# ------------------------------------------------------------
+
+png(
   filename = file.path(figures_dir, "SE_genes_cancer_vs_normal_boxplot.png"),
-  plot = p_cell_lines,
   width = 8,
   height = 5,
-  dpi = 300
+  units = "in",
+  res = 300
 )
 
-# ------------------------------------------------------------
-# Plot 2:
-# Broad cancer versus non-cancer comparison
-# ------------------------------------------------------------
+plot_se_boxplot()
 
-p_broad <- ggplot(
-  se_breaks,
-  aes(x = broad_group, y = ratio_non_se, fill = broad_group)
-) +
-  geom_boxplot(
-    outlier.shape = 16,
-    outlier.size = 0.5
-  ) +
-  coord_cartesian(ylim = c(0, 18)) +
-  labs(
-    title = "SE-gene break enrichment in cancer versus non-cancer cells",
-    x = "",
-    y = "Break density at SE genes / median non-SE genes",
-    fill = ""
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    panel.grid = element_blank(),
-    legend.position = "none"
-  )
-
-ggsave(
-  filename = file.path(figures_dir, "SE_genes_cancer_vs_normal_grouped_boxplot.pdf"),
-  plot = p_broad,
-  width = 5,
-  height = 5
-)
-
-ggsave(
-  filename = file.path(figures_dir, "SE_genes_cancer_vs_normal_grouped_boxplot.png"),
-  plot = p_broad,
-  width = 5,
-  height = 5,
-  dpi = 300
-)
+dev.off()
 
 # ------------------------------------------------------------
 # Print summary
 # ------------------------------------------------------------
 
-message("SE genes in cancer vs normal analysis complete.")
+message("SE genes in cancer vs normal boxplot complete.")
 message("Input rows: ", nrow(se_breaks))
-message("Cell lines included: ", paste(unique(se_breaks$cell_line), collapse = ", "))
-message("Wilcoxon cancer vs non-cancer P value: ", signif(wilcox_cancer_vs_non_cancer$p.value, 3))
-message("Results written to: ", results_dir)
-message("Figures written to: ", figures_dir)
+message("Summary written to: ", file.path(results_dir, "SE_genes_cancer_vs_normal_summary.csv"))
+message("Figure written to: ", figures_dir)
