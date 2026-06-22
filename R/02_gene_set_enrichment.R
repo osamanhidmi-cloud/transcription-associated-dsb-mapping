@@ -6,8 +6,13 @@
 # using the hypergeometric test.
 #
 # Important:
-# The gene universe must be the genome-wide/background gene set,
-# not only the final transcription-stress genes.
+# The gene universe is defined from the full processed gene-level
+# input tables, not from the final transcription-stress gene list.
+#
+# This script tests enrichment only. It does not perform depletion
+# analysis, because the output of script 01 contains the retained
+# high-scoring transcription-stress candidates, not a genome-wide
+# ranked list with meaningful bottom-score genes.
 #
 # Input:
 #   results/transcription_stress_gene_scores.csv
@@ -39,10 +44,6 @@ suppressPackageStartupMessages({
 input_dir <- "data/example"
 results_dir <- "results"
 
-# Since script 01 retained 64 genes, this will use all 64 if n_top > 64.
-n_top <- 100
-n_bottom <- 100
-
 # ------------------------------------------------------------
 # Helper functions
 # ------------------------------------------------------------
@@ -55,36 +56,31 @@ clean_gene_symbol <- function(x) {
     toupper()
 }
 
-hypergeom_gene_set_test <- function(query_genes,
-                                    gene_set,
-                                    gene_universe,
-                                    gene_set_name,
-                                    direction = c("enrichment", "depletion")) {
-  
-  direction <- match.arg(direction)
+hypergeom_enrichment_test <- function(query_genes,
+                                      gene_set,
+                                      gene_universe,
+                                      gene_set_name) {
   
   gene_universe <- unique(clean_gene_symbol(gene_universe))
   query_genes <- intersect(unique(clean_gene_symbol(query_genes)), gene_universe)
   gene_set <- intersect(unique(clean_gene_symbol(gene_set)), gene_universe)
   
-  M <- length(gene_universe)                    # total background genes
-  N <- length(query_genes)                      # selected genes
-  m <- length(gene_set)                         # genes in gene set
-  n <- M - m                                    # genes not in gene set
-  k <- length(intersect(query_genes, gene_set)) # observed overlap
+  M <- length(gene_universe)                       # background genes
+  N <- length(query_genes)                         # selected TSS genes
+  m <- length(gene_set)                            # genes in tested set
+  n <- M - m                                       # genes not in tested set
+  k <- length(intersect(query_genes, gene_set))    # observed overlap
   
   expected <- (m / M) * N
   enrichment_ratio <- ifelse(expected == 0, NA_real_, k / expected)
   
-  p_value <- if (direction == "enrichment") {
-    phyper(k - 1, m, n, N, lower.tail = FALSE)
-  } else {
-    phyper(k, m, n, N, lower.tail = TRUE)
-  }
+  # Upper-tail hypergeometric test:
+  # probability of observing k or more overlaps by chance.
+  p_value <- phyper(k - 1, m, n, N, lower.tail = FALSE)
   
   tibble(
     gene_set = gene_set_name,
-    direction = direction,
+    test = "enrichment_in_transcription_stress_genes",
     observed_overlap = k,
     expected_overlap = expected,
     enrichment_ratio = enrichment_ratio,
@@ -105,11 +101,16 @@ tss_scores <- read_csv(
 )
 
 if (nrow(tss_scores) == 0) {
-  stop("transcription_stress_gene_scores.csv is empty. Run script 01 first and check the input files.")
+  stop("transcription_stress_gene_scores.csv is empty. Run script 01 first.")
 }
 
+# Use all retained transcription-stress candidates from script 01.
+tss_genes <- tss_scores |>
+  arrange(desc(TSS_final)) |>
+  pull(gene)
+
 # ------------------------------------------------------------
-# Read genome-wide processed signal tables to define background
+# Read full processed signal tables to define gene universe
 # ------------------------------------------------------------
 
 break_density <- read_csv(
@@ -132,9 +133,8 @@ top1cc_density <- read_csv(
   show_col_types = FALSE
 )
 
-# Background gene universe:
-# all unique genes represented in the processed gene-level datasets.
-# This replaces the hard-coded 26915 used in the exploratory script.
+# Background universe:
+# all genes represented in at least one processed gene-level table.
 gene_universe <- Reduce(
   union,
   list(
@@ -147,23 +147,6 @@ gene_universe <- Reduce(
   unique() |>
   na.omit() |>
   as.character()
-
-# ------------------------------------------------------------
-# Define top and bottom transcription-stress gene groups
-# ------------------------------------------------------------
-
-n_top_use <- min(n_top, nrow(tss_scores))
-n_bottom_use <- min(n_bottom, nrow(tss_scores))
-
-top_tss_genes <- tss_scores |>
-  arrange(desc(TSS_final)) |>
-  slice_head(n = n_top_use) |>
-  pull(gene)
-
-bottom_tss_genes <- tss_scores |>
-  arrange(TSS_final) |>
-  slice_head(n = n_bottom_use) |>
-  pull(gene)
 
 # ------------------------------------------------------------
 # Read gene-set files
@@ -185,7 +168,7 @@ top_expressed <- read_csv(
 )
 
 # ------------------------------------------------------------
-# Standardize available gene sets
+# Standardize gene sets
 # ------------------------------------------------------------
 
 se_genes <- sedb_mcf7_genes |>
@@ -203,10 +186,6 @@ highly_expressed_genes <- top_expressed |>
 se_oncogenes <- intersect(se_genes, oncogene_genes)
 highly_expressed_se_genes <- intersect(highly_expressed_genes, se_genes)
 
-# ------------------------------------------------------------
-# Define gene sets to test
-# ------------------------------------------------------------
-
 gene_sets <- list(
   "SE-regulated genes" = se_genes,
   "Oncogenes" = oncogene_genes,
@@ -216,37 +195,23 @@ gene_sets <- list(
 )
 
 # ------------------------------------------------------------
-# Run enrichment/depletion tests
+# Run enrichment tests
 # ------------------------------------------------------------
 
-top_enrichment <- imap_dfr(
+enrichment_results <- imap_dfr(
   gene_sets,
-  ~ hypergeom_gene_set_test(
-    query_genes = top_tss_genes,
+  ~ hypergeom_enrichment_test(
+    query_genes = tss_genes,
     gene_set = .x,
     gene_universe = gene_universe,
-    gene_set_name = .y,
-    direction = "enrichment"
+    gene_set_name = .y
   )
-)
-
-bottom_depletion <- imap_dfr(
-  gene_sets,
-  ~ hypergeom_gene_set_test(
-    query_genes = bottom_tss_genes,
-    gene_set = .x,
-    gene_universe = gene_universe,
-    gene_set_name = .y,
-    direction = "depletion"
-  )
-)
-
-enrichment_results <- bind_rows(top_enrichment, bottom_depletion) |>
+) |>
   mutate(
     p_adjusted = p.adjust(p_value, method = "BH"),
     minus_log10_p = -log10(p_value)
   ) |>
-  arrange(direction, desc(enrichment_ratio))
+  arrange(desc(enrichment_ratio))
 
 # ------------------------------------------------------------
 # Export results
@@ -263,6 +228,5 @@ write_csv(
 
 message("Enrichment analysis complete.")
 message("Background universe size: ", length(gene_universe))
-message("Top query size: ", length(top_tss_genes))
-message("Bottom query size: ", length(bottom_tss_genes))
+message("Transcription-stress query size: ", length(tss_genes))
 message("Output written to: ", file.path(results_dir, "transcription_stress_gene_set_enrichment.csv"))
