@@ -22,9 +22,8 @@ transcription-associated-dsb-mapping/
   R/
     01_score_transcription_stress_genes.R
     02_gene_set_enrichment.R
-    03_example_plots.R
-    04_SE_genes_cancer_vs_normal.R
-    05_E2_induced_transcription_SE_breaks.R
+    03_SE_genes_cancer_vs_normal.R
+    04_E2_induced_transcription_SE_breaks.R
   data/
     example/
       break_density_gene_level.csv
